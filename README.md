@@ -10,7 +10,7 @@ Open the script's link below in a browser that has Tampermonkey installed — it
 
 ## `gcal-height.user.js` — Fit Google Calendar's week view to the viewport
 
-[Install →](./gcal-height.user.js)
+[Install →](https://raw.githubusercontent.com/hgabreu/userscripts/main/gcal-height.user.js)
 
 Compresses Google Calendar's week/day timed-grid so all 24 hours fit the viewport without scrolling. Stretches the day cells to fill `viewport_height − chrome`, repositions every event chip to the correct fractional time, redraws hour grid-lines at the new spacing, and adds a small tick from the labels into the grid so the visual reading stays clear.
 
@@ -28,6 +28,12 @@ Compresses Google Calendar's week/day timed-grid so all 24 hours fit the viewpor
 
 ## `gcal-year.user.js` — Year-timeline view for Google Calendar
 
-[Install →](./gcal-year.user.js)
+[Install →](https://raw.githubusercontent.com/hgabreu/userscripts/main/gcal-year.user.js)
 
 Adds a custom year-timeline view that shows full-day events across the whole year on one screen. Useful for yearly planning, like vacations, travel, recurring events, anything where seeing twelve months at once matters.
+
+---
+
+## License
+
+[MIT](./LICENSE) — do whatever, no warranty.

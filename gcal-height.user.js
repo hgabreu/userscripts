@@ -1,17 +1,18 @@
 // ==UserScript==
 // @name         Google Calendar — Fit Week to Viewport
-// @namespace    github.com/henrique
-// @version      0.3.11
+// @namespace    https://github.com/hgabreu/userscripts
+// @version      0.3.12
 // @description  Compresses the week/day timed grid so all 24 hours fit the viewport without scrolling.
 // @match        https://calendar.google.com/*
 // @run-at       document-idle
 // @grant        none
+// @license      MIT
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const VERSION = '0.3.11';
+  const VERSION = '0.3.12';
   console.log('[gcal-height]', VERSION, 'loaded at', new Date().toISOString());
   // Guard against double-install (e.g. Tampermonkey + manual injection).
   if (window.__gcalFitWeekInstalled) {

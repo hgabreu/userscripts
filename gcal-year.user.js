@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Google Calendar Year Timeline View
-// @namespace    http://tampermonkey.net/
-// @version      1.0
+// @namespace    https://github.com/hgabreu/userscripts
+// @version      1.0.1
 // @description  Custom timeline view for Google Calendar year view with full-day events
 // @author       Henrique Abreu
 // @match        https://calendar.google.com/calendar/*
 // @grant        none
 // @run-at       document-idle
+// @license      MIT
 // ==/UserScript==
 
 (function() {
