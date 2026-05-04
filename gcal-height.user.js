@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Calendar — Fit Week to Viewport
 // @namespace    https://github.com/hgabreu/userscripts
-// @version      0.4.0
+// @version      0.4.1
 // @description  Compresses the week/day timed grid so all 24 hours fit the viewport without scrolling.
 // @match        https://calendar.google.com/*
 // @run-at       document-idle
@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.4.0';
+  const VERSION = '0.4.1';
   console.log('[gcal-height]', VERSION, 'loaded at', new Date().toISOString());
   if (window.__gcalFitWeekInstalled) {
     console.log('[gcal-height]', VERSION, 'skipping — already installed:', window.__gcalFitWeekInstalled);
@@ -48,9 +48,12 @@
     labelsColumnLast: tag(R.labelsColumnLast),
     // Hour labels: every direct child of any tagged labels column.
     hourLabel: `${tag(R.labelsColumn)} > *, ${tag(R.labelsColumnLast)} > *`,
-    // Event chips: Google sets [data-eventchip] on every timed-grid chip; far
-    // more stable than the hashed .GTG3wb class. Scoped to our tagged inner row.
-    eventChip: `${tag(R.innerRow)} [data-eventchip]`,
+    // Anything in the timed grid that GCal positions with inline `top: Xpx`.
+    // Covers event chips (which also have inline `height: Ypx`, marked with
+    // [data-eventchip]) and the now-line + now-dot indicators (top only). All
+    // need px → % conversion or they fall outside the compressed day cell and
+    // get clipped.
+    inlinePositioned: `${tag(R.innerRow)} [style*="top:"]`,
   };
   const NATURAL_HOUR_PX = 60;
   const NATURAL_DAY_PX = NATURAL_HOUR_PX * 24; // 1440
@@ -265,7 +268,7 @@
   function applyCss() {
     const m = measure();
     if (!m) return false;
-    document.querySelectorAll(SEL.eventChip).forEach(processChip);
+    document.querySelectorAll(SEL.inlinePositioned).forEach(processInlinePositioned);
     // Re-align widths on every apply — the all-day cells may lazy-render after
     // the initial pass, and they re-flow on width changes.
     alignDayCellWidths(cachedAnchors);
@@ -356,26 +359,38 @@
   // percentage of the *natural* day (24 × that ruler) so chips resolve to the
   // right fraction regardless of what cell height our CSS has imposed.
   //
-  // GCal positions chips at (ideal_top - 1) and (ideal_height - 2) so
-  // consecutive chips have a small visual gap. Add 1 to top so chip-top lands
-  // exactly on the hour line; leave height alone so the bottom keeps GCal's
-  // 2px gap to the next event.
-  const TOP_PX_OFFSET = 1;
-  const HEIGHT_PX_OFFSET = 0;
-  function processChip(el) {
+  // The same conversion applies to the "now" indicator (red horizontal line +
+  // dot), which GCal positions with inline `top: Xpx` (no inline height).
+  // Without this conversion the indicator falls outside our compressed day
+  // cell and gets clipped.
+  //
+  // For chips, GCal sets top = ideal - 1 and height = ideal - 2 so consecutive
+  // chips have a small visual gap. Add 1 to chip top so chip-top lands exactly
+  // on the hour line; leave height alone so the bottom keeps GCal's 2px gap.
+  // The now-line/dot have no such offset — their inline top is exact.
+  const CHIP_TOP_PX_OFFSET = 1;
+  const CHIP_HEIGHT_PX_OFFSET = 0;
+  function processInlinePositioned(el) {
     const ts = el.style.top;
-    const hs = el.style.height;
-    if (!ts || !hs) return;
-    if (ts.endsWith('%') && hs.endsWith('%')) return;
+    if (!ts || ts.endsWith('%')) return;
     const t = parseFloat(ts);
-    const h = parseFloat(hs);
-    if (Number.isNaN(t) || Number.isNaN(h)) return;
+    if (Number.isNaN(t)) return;
     const ruler = cachedAnchors?.hourRuler ?? document.querySelector(SEL.hourRuler);
     const oneHour = ruler?.getBoundingClientRect().height || NATURAL_HOUR_PX;
     if (oneHour <= 0) return;
     const dayPx = oneHour * 24;
-    el.style.top = ((t + TOP_PX_OFFSET) / dayPx * 100).toFixed(4) + '%';
-    el.style.height = ((h + HEIGHT_PX_OFFSET) / dayPx * 100).toFixed(4) + '%';
+    const isChip = el.hasAttribute('data-eventchip');
+    const topOff = isChip ? CHIP_TOP_PX_OFFSET : 0;
+    el.style.top = ((t + topOff) / dayPx * 100).toFixed(4) + '%';
+    // Convert inline height too, but only if GCal set it in px. The now-line
+    // and dot have height set via CSS class (not inline) — leave those alone.
+    const hs = el.style.height;
+    if (hs && !hs.endsWith('%')) {
+      const h = parseFloat(hs);
+      if (!Number.isNaN(h)) {
+        el.style.height = ((h + CHIP_HEIGHT_PX_OFFSET) / dayPx * 100).toFixed(4) + '%';
+      }
+    }
   }
 
   function startObserver() {
@@ -386,8 +401,8 @@
     observer = new MutationObserver((muts) => {
       let needsApply = false;
       for (const m of muts) {
-        if (m.type === 'attributes' && m.target instanceof Element && m.target.matches(SEL.eventChip)) {
-          processChip(m.target);
+        if (m.type === 'attributes' && m.target instanceof Element && m.target.matches(SEL.inlinePositioned)) {
+          processInlinePositioned(m.target);
         } else if (m.type === 'childList' && (m.addedNodes.length || m.removedNodes.length)) {
           needsApply = true;
         }
