@@ -6,6 +6,7 @@
 *.jpg
 *.jpeg
 *.yml
+*.yaml
 
 # OS junk
 .DS_Store
@@ -16,8 +17,8 @@ Thumbs.db
 .idea/
 *.swp
 
-# Local Claude Code settings
-.claude/settings.local.json
+# Local Claude Code settings (tooling, not project code)
+.claude/
 
 # Local-dev loader stubs (each contains a file:// @require pointing at the
 # real .user.js — useful for live-reload during development, not relevant

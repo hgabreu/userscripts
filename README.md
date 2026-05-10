@@ -12,7 +12,7 @@ Open the script's link below in a browser that has Tampermonkey installed — it
 
 [Install →](https://raw.githubusercontent.com/hgabreu/userscripts/main/gcal-height.user.js)
 
-Sets Google Calendar's week/day timed-grid so all 24 hours fit the viewport without scrolling. Resizes the day cells to fill `viewport_height − chrome`, repositions every event chip to the correct fractional time, redraws hour grid-lines at the new spacing. Works in Week and Day views.
+Sets Google Calendar's week/day timed-grid so all 24 hours fit the viewport without scrolling. Resizes the day cells to fill `viewport_height − chrome`, repositions every event chip to the correct fractional time, redraws hour grid-lines at the new spacing, and translates click coordinates so drag-to-create still reads the time you actually clicked. Works in Week and Day views.
 
 ---
 

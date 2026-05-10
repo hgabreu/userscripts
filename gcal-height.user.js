@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Calendar — Fit Week to Viewport
 // @namespace    https://github.com/hgabreu/userscripts
-// @version      0.4.1
+// @version      0.4.4
 // @description  Compresses the week/day timed grid so all 24 hours fit the viewport without scrolling.
 // @match        https://calendar.google.com/*
 // @run-at       document-idle
@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '0.4.1';
+  const VERSION = '0.4.4';
   console.log('[gcal-height]', VERSION, 'loaded at', new Date().toISOString());
   if (window.__gcalFitWeekInstalled) {
     console.log('[gcal-height]', VERSION, 'skipping — already installed:', window.__gcalFitWeekInstalled);
@@ -266,6 +266,12 @@
   }
 
   function applyCss() {
+    // The pointer corrector's rect override on scrollContainer/innerRow makes
+    // measure() return the natural (1440 px) layout while a drag is in flight,
+    // which would re-apply CSS with the wrong heights mid-drag. Skip while a
+    // drag is active — DOM mutations during the drag will queue another
+    // applyCss after the drag ends.
+    if (dragState) return false;
     const m = measure();
     if (!m) return false;
     document.querySelectorAll(SEL.inlinePositioned).forEach(processInlinePositioned);
@@ -393,6 +399,129 @@
     }
   }
 
+  // GCal computes click→time using the hour-ruler's rendered height as px/hour
+  // (it does NOT use a hardcoded 60 or the day-cell's height). The script
+  // compresses the day cell but leaves the hour-ruler at whatever GCal rendered
+  // it to (60 on small viewports, ~116 on tall ones) — so any time the day
+  // cell's `height/24` disagrees with the hour-ruler height, drag-to-create
+  // reads the wrong time.
+  //
+  // Naive fix (override event.clientY to the natural-coords value) works for
+  // clicks in the upper half of the cell but fails for the lower half: the
+  // corrected clientY ends up below the viewport, and GCal silently bails
+  // (probably an off-screen check). So we keep clientY in viewport and shift
+  // the cell's anchor instead: pick `top'` such that the SAME visual click,
+  // with clientY' = visual_hour * hour_px + top', satisfies GCal's formula
+  // (clientY' - top') / hour_px = visual_hour.
+  //
+  // top' and hour_px are both locked at drag start (so visual_hour at the start
+  // maps to its own unmodified clientY) and held constant for the rest of the
+  // drag — moving top' per-event would cause GCal's start-time read at
+  // pointerup to use the current event's top' against the cached pointerdown
+  // clientY, off-by-one.  Constant top' breaks cleanly only if the drag spans
+  // less than viewport_height / hour_px hours; longer drags would push the
+  // projected clientY' past the viewport and re-trip the off-screen bail-out.
+  //
+  // Skip events targeting `[role=button]` (event chips) — GCal's chip-open
+  // logic doesn't need clientY, and our rect override of the day-cell anchor
+  // confuses its hit-testing. Cost: chip drag-reschedule and drag-resize are
+  // not corrected; that's the same broken state as before this fix.
+  const POINTER_EVENT_TYPES = [
+    'pointerdown', 'pointermove', 'pointerup', 'pointerover', 'pointerout',
+    'mousedown', 'mousemove', 'mouseup', 'mouseover', 'mouseout',
+    'click', 'dblclick',
+  ];
+  // Selectors of elements whose rect.top GCal reads to anchor time =
+  // (clientY - rect.top) / hour_px. dayCell alone isn't enough — empirically
+  // GCal also reads scrollContainer and innerRow during drag.
+  const RECT_OVERRIDE_SELS = [
+    () => SEL.dayCell, () => SEL.scrollContainer, () => SEL.innerRow,
+  ];
+  let dragState = null; // { topPrime, hourPx, naturalDayPx, targets } during an active drag
+  function setRectOverride(topPrime, naturalDayPx) {
+    const targets = [];
+    for (const sel of RECT_OVERRIDE_SELS.map((f) => f())) {
+      document.querySelectorAll(sel).forEach((el) => {
+        try { delete el.getBoundingClientRect; } catch (_) {}
+        const r = el.getBoundingClientRect();
+        const fake = DOMRect.fromRect({ x: r.x, y: topPrime, width: r.width, height: naturalDayPx });
+        try {
+          Object.defineProperty(el, 'getBoundingClientRect', { value: () => fake, configurable: true });
+          targets.push(el);
+        } catch (_) {}
+      });
+    }
+    return targets;
+  }
+  function clearRectOverride(els) {
+    for (const el of els || []) try { delete el.getBoundingClientRect; } catch (_) {}
+  }
+  function correctPointerEvent(e) {
+    const dc = e.target?.closest?.(SEL.dayCell);
+    // Skip events outside the day cell or on event chips (chip clicks rely on
+    // target hit-testing, not clientY; rect override breaks them).
+    if (!dc || e.target.closest('[role="button"]')) {
+      if (dragState) {
+        clearRectOverride(dragState.targets);
+        dragState = null;
+      }
+      return;
+    }
+    // Read the genuine rect (clear any in-flight override first).
+    if (dragState) clearRectOverride(dragState.targets);
+    const r = dc.getBoundingClientRect();
+    // GCal's px/hour is whatever the hour-ruler is currently rendered at, not
+    // a fixed value. Read it fresh so the correction stays accurate across
+    // viewport resizes (compressed → 60, stretched → ~116, etc).
+    const hr = cachedAnchors?.hourRuler ?? document.querySelector(SEL.hourRuler);
+    const hourPx = hr?.getBoundingClientRect().height || NATURAL_HOUR_PX;
+    const naturalDayPx = hourPx * 24;
+    const scale = r.height / naturalDayPx;
+    // Skip the no-op identity case (also covers the brief window before
+    // applyCss has run for the first time).
+    if (Math.abs(scale - 1) < 0.01) return;
+
+    const isDragStart = e.type === 'pointerdown' || e.type === 'mousedown';
+    const isDragEnd = e.type === 'pointerup' || e.type === 'mouseup' || e.type === 'click';
+    // Lock topPrime + hourPx at drag start so the start-time read at pointerup
+    // is stable even if GCal re-renders the ruler mid-drag.
+    const topPrime = dragState ? dragState.topPrime : e.clientY - (e.clientY - r.top) / scale;
+    const lockedHourPx = dragState ? dragState.hourPx : hourPx;
+    const lockedNaturalDayPx = dragState ? dragState.naturalDayPx : naturalDayPx;
+    const targets = setRectOverride(topPrime, lockedNaturalDayPx);
+
+    const visualHour = (e.clientY - r.top) / (lockedHourPx * scale);
+    const corrected = visualHour * lockedHourPx + topPrime;
+    try {
+      Object.defineProperty(e, 'clientY', { get() { return corrected; }, configurable: true });
+      Object.defineProperty(e, 'pageY', { get() { return corrected + window.scrollY; }, configurable: true });
+      Object.defineProperty(e, 'y', { get() { return corrected; }, configurable: true });
+    } catch (_) {}
+
+    if (isDragStart) {
+      dragState = { topPrime, hourPx: lockedHourPx, naturalDayPx: lockedNaturalDayPx, targets };
+    } else if (dragState) {
+      dragState.targets = targets;
+    } else {
+      // Hover/standalone events: GCal might read the rect on the next animation
+      // frame. setTimeout(0) fires after raf, so the override is still live
+      // when GCal needs it but doesn't leak across event chains.
+      setTimeout(() => clearRectOverride(targets), 0);
+    }
+    if (isDragEnd && dragState) {
+      const tgs = dragState.targets;
+      dragState = null;
+      // Hold the override briefly past pointerup so GCal's end-of-drag
+      // finalization (which reads rect after the event chain) still sees it.
+      setTimeout(() => clearRectOverride(tgs), 100);
+    }
+  }
+  function installPointerCorrector() {
+    for (const t of POINTER_EVENT_TYPES) {
+      window.addEventListener(t, correctPointerEvent, { capture: true });
+    }
+  }
+
   function startObserver() {
     if (observer) observer.disconnect();
     // Observe document.body (never replaced) instead of [role="main"], which
@@ -442,6 +571,7 @@
       hourPx: cachedAnchors.hourRuler.getBoundingClientRect().height,
     });
     startObserver();
+    installPointerCorrector();
     window.addEventListener('resize', onResize, { passive: true });
   }
 
